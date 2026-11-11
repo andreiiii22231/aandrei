@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>ZVON Тест телефона</title>
+<meta name="theme-color" content="#E2261C">
+<style>
+/* Mobile-first, one test per screen; brand gradient from the ZVON MARKET logo */
+:root{
+  --red:#E2261C; --orange:#F57C00; --yellow:#FFC21A; --ink:#1b1410; --muted:#5c524c;
+  --card:#ffffff; --ok:#1f9d55; --bad:#d32f2f; --skip:#8a817b; --line:#eadfd8;
+  --f:"Onest",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;font-family:var(--f);color:var(--ink);background:linear-gradient(150deg,#E2261C 0%,#F2541B 40%,#FF8F00 75%,#FFC21A 100%);background-attachment:fixed;-webkit-user-select:none;user-select:none}
+.app{min-height:100%;display:flex;flex-direction:column;padding:max(14px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+.top{display:flex;align-items:center;justify-content:space-between;color:#fff;margin-bottom:12px}
+.brand{font-weight:900;letter-spacing:.02em;font-size:18px}
+.brand span{background:#fff;color:var(--red);border-radius:999px;padding:2px 10px;margin-left:6px;font-size:14px}
+.prog{font-weight:700;font-size:14px;opacity:.95}
+.bar{height:6px;background:rgba(255,255,255,.35);border-radius:6px;overflow:hidden;margin-bottom:14px}
+.bar i{display:block;height:100%;background:#fff;width:0;transition:width .3s}
+.card{background:var(--card);border-radius:20px;padding:20px 18px;box-shadow:0 14px 40px -18px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:14px;flex:1;animation:in .35s ease both}
+@keyframes in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+h1{margin:0;font-size:24px;line-height:1.2}
+p{margin:0;font-size:17px;line-height:1.5;color:var(--muted)}
+.big{font-size:17px;font-weight:600;color:var(--ink)}
+.btns{display:flex;flex-direction:column;gap:10px;margin-top:auto}
+button{font:inherit;font-size:18px;font-weight:800;border:0;border-radius:14px;padding:16px;cursor:pointer;color:#fff;background:var(--red)}
+button.ok{background:var(--ok)} button.bad{background:var(--bad)} button.ghost{background:#f3ece8;color:var(--ink)}
+button:active{transform:scale(.98)}
+.meter{height:22px;background:#f3ece8;border-radius:12px;overflow:hidden}
+.meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--ok),var(--yellow),var(--red));transition:width .08s}
+video{width:100%;max-height:52vh;border-radius:14px;background:#000;object-fit:cover}
+.status{font-weight:800;font-size:16px}
+.status.ok{color:var(--ok)} .status.bad{color:var(--bad)}
+.list{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;list-style:none}
+.list li{display:flex;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:12px;background:#f8f3f0;font-size:16px;font-weight:600}
+.tagok{color:var(--ok)} .tagbad{color:var(--bad)} .tagskip{color:var(--skip)}
+.code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:44px;font-weight:900;letter-spacing:.12em;text-align:center;background:#fff6d6;border:3px dashed var(--yellow);border-radius:16px;padding:14px 8px;color:var(--ink)}
+.info{font-size:14px;color:var(--muted);line-height:1.5}
+/* fullscreen layers */
+.layer{position:fixed;inset:0;z-index:50;touch-action:none}
+.layer .hint{position:absolute;left:50%;bottom:max(20px,env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;font-weight:700;padding:10px 16px;border-radius:999px;font-size:15px;white-space:nowrap;pointer-events:none}
+.grid{position:absolute;inset:0;display:grid;background:#fff}
+.grid div{border:1px solid #e3d8d2;background:#fff}
+.grid div.on{background:var(--ok);border-color:var(--ok)}
+.hidden{display:none!important}
+@media (prefers-reduced-motion:reduce){.card{animation:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top"><div class="brand">ZVON<span>MARKET</span></div><div class="prog" id="prog"></div></div>
+  <div class="bar"><i id="barFill"></i></div>
+  <main id="screen"></main>
+</div>
+<div class="layer hidden" id="layer"></div>
+
+<script>
+// Test order is fixed: the bit position of each test is part of the result code the calculator reads
+const TESTS=[
+  {k:"screen", t:"Экран"},
+  {k:"touch",  t:"Сенсор"},
+  {k:"speaker",t:"Динамик"},
+  {k:"mic",    t:"Микрофон"},
+  {k:"rear",   t:"Основная камера"},
+  {k:"front",  t:"Фронтальная камера"},
+  {k:"vibro",  t:"Вибрация"},
+  {k:"motion", t:"Датчики движения"}
+];
+const res={}; // k -> "ok" | "bad" | "skip"
+let step=-1, stream=null, audioCtx=null, raf=0;
+const $=id=>document.getElementById(id);
+const scr=$("screen"), layer=$("layer");
+
+function stopMedia(){
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
+  if(raf){cancelAnimationFrame(raf);raf=0}
+}
+function setProg(){
+  const n=Math.max(0,Math.min(step,TESTS.length));
+  $("prog").textContent=step<0?"Проверка телефона":step>=TESTS.length?"Готово":`Шаг ${step+1} из ${TESTS.length}`;
+  $("barFill").style.width=(n/TESTS.length*100)+"%";
+}
+function card(html){scr.innerHTML=`<div class="card">${html}</div>`;setProg()}
+function mark(k,v){res[k]=v;stopMedia();next()}
+function next(){step++;setProg();if(step>=TESTS.length)return finish();RUN[TESTS[step].k]()}
+function answer(k,okText,badText){
+  return `<div class="btns">
+    <button class="ok" onclick="mark('${k}','ok')">${okText||"Да, всё работает"}</button>
+    <button class="bad" onclick="mark('${k}','bad')">${badText||"Нет, есть проблема"}</button>
+    <button class="ghost" onclick="mark('${k}','skip')">Пропустить</button></div>`;
+}
+
+const RUN={
+  screen(){
+    card(`<h1>Экран</h1><p>Экран зальётся разными цветами. Нажимайте на экран, чтобы сменить цвет. Ищите битые точки, полосы, пятна и засветы.</p><div class="btns"><button onclick="colors()">Начать</button><button class="ghost" onclick="mark('screen','skip')">Пропустить</button></div>`);
+  },
+  touch(){
+    card(`<h1>Сенсор</h1><p>Проведите пальцем по всему экрану, чтобы закрасить все клетки зелёным. Если какая-то зона не закрашивается, сенсор неисправен.</p><div class="btns"><button onclick="touchGrid()">Начать</button><button class="ghost" onclick="mark('touch','skip')">Пропустить</button></div>`);
+  },
+  speaker(){
+    card(`<h1>Динамик</h1><p>Сделайте громкость побольше и нажмите «Проиграть звук». Звук должен быть чистым, без хрипа и треска.</p><button onclick="beep()">▶ Проиграть звук</button>${answer("speaker","Звук чистый","Нет звука или хрипит")}`);
+  },
+  mic(){
+    card(`<h1>Микрофон</h1><p>Нажмите «Включить микрофон», разрешите доступ и скажите что-нибудь. Полоска должна двигаться.</p><button onclick="micTest()">🎤 Включить микрофон</button><div class="meter"><i id="lvl"></i></div><div class="status" id="micSt"></div>${answer("mic","Полоска двигается","Не реагирует")}`);
+  },
+  rear(){camTest("rear","environment","Основная камера","Проверьте, что изображение чёткое, фокус наводится, нет пятен и полос.")},
+  front(){camTest("front","user","Фронтальная камера","Проверьте, что изображение чёткое, без пятен и полос.")},
+  vibro(){
+    if(!("vibrate" in navigator)){
+      card(`<h1>Вибрация</h1><p>На этом телефоне (обычно iPhone) браузер не умеет включать вибрацию. Проверьте вручную: переключите беззвучный режим, телефон должен вибрировать.</p>${answer("vibro","Вибрация есть","Вибрации нет")}`);return;
+    }
+    card(`<h1>Вибрация</h1><p>Нажмите кнопку и держите телефон в руке.</p><button onclick="navigator.vibrate([400,150,400])">📳 Включить вибрацию</button>${answer("vibro","Вибрирует","Не вибрирует")}`);
+  },
+  motion(){
+    card(`<h1>Датчики движения</h1><p>Нажмите «Начать» и покрутите телефон в руке.</p><button onclick="motionTest()">Начать</button><div class="status" id="motSt"></div><div class="btns"><button class="bad" onclick="mark('motion','bad')">Не реагирует</button><button class="ghost" onclick="mark('motion','skip')">Пропустить</button></div>`);
+  }
+};
+
+function fs(el){try{(el.requestFullscreen||el.webkitRequestFullscreen||function(){}).call(el)}catch(e){}}
+function exitFs(){try{if(document.fullscreenElement)document.exitFullscreen()}catch(e){}}
+
+function colors(){
+  const list=["#ff0000","#00ff00","#0000ff","#ffffff","#000000","#808080"];
+  let i=0;layer.classList.remove("hidden");fs(layer);
+  const paint=()=>{layer.style.background=list[i];layer.innerHTML=`<div class="hint">Нажмите для следующего цвета · ${i+1}/${list.length}</div>`};
+  paint();
+  layer.onclick=()=>{i++;if(i<list.length)return paint();
+    layer.onclick=null;layer.classList.add("hidden");layer.innerHTML="";exitFs();
+    card(`<h1>Экран</h1><p class="big">Были битые точки, полосы, пятна или засветы?</p>${answer("screen","Нет, экран чистый","Да, есть дефекты")}`);
+  };
+}
+
+function touchGrid(){
+  const cols=7, rows=Math.max(10,Math.round(cols*innerHeight/innerWidth));
+  layer.classList.remove("hidden");fs(layer);
+  layer.innerHTML=`<div class="grid" style="grid-template-columns:repeat(${cols},1fr);grid-template-rows:repeat(${rows},1fr)">${"<div></div>".repeat(cols*rows)}</div><div class="hint" id="tHint">Закрасьте все клетки · 0%</div>`;
+  const cells=[...layer.querySelectorAll(".grid div")];let done=0;
+  const hit=(x,y)=>{const el=document.elementFromPoint(x,y);if(el&&el.parentNode&&el.parentNode.classList&&el.parentNode.classList.contains("grid")&&!el.classList.contains("on")){el.classList.add("on");done++;
+    $("tHint").textContent=`Закрасьте все клетки · ${Math.round(done/cells.length*100)}%`;
+    if(done===cells.length)finishTouch(true)}};
+  const onMove=e=>{e.preventDefault();for(const t of e.touches||[e])hit(t.clientX,t.clientY)};
+  layer.ontouchstart=layer.ontouchmove=onMove;
+  layer.onpointermove=e=>{if(e.buttons||e.pointerType==="touch")hit(e.clientX,e.clientY)};
+  layer.onpointerdown=e=>hit(e.clientX,e.clientY);
+  // a way out when a zone is dead: long press on the hint area is not possible, so give a timed escape button
+  setTimeout(()=>{if(layer.classList.contains("hidden"))return;
+    const b=document.createElement("button");b.textContent="Не закрашивается";b.className="bad";
+    b.style.cssText="position:absolute;top:max(14px,env(safe-area-inset-top));right:14px;font-size:14px;padding:10px 14px;z-index:2";
+    b.onclick=ev=>{ev.stopPropagation();finishTouch(false)};layer.appendChild(b)},4000);
+}
+function finishTouch(ok){
+  layer.ontouchstart=layer.ontouchmove=layer.onpointermove=layer.onpointerdown=null;
+  layer.classList.add("hidden");layer.innerHTML="";exitFs();mark("touch",ok?"ok":"bad");
+}
+
+function beep(){
+  try{
+    audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+    const o=audioCtx.createOscillator(),g=audioCtx.createGain(),t=audioCtx.currentTime;
+    o.type="sine";o.connect(g);g.connect(audioCtx.destination);
+    [440,660,880,523].forEach((f,i)=>o.frequency.setValueAtTime(f,t+i*.35));
+    g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(.8,t+.05);g.gain.setValueAtTime(.8,t+1.3);g.gain.exponentialRampToValueAtTime(.0001,t+1.45);
+    o.start(t);o.stop(t+1.5);
+  }catch(e){}
+}
+
+async function micTest(){
+  const st=$("micSt");
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){st.textContent="Браузер не даёт доступ к микрофону. Откройте страницу по адресу https.";st.className="status bad";return}
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:true});
+    audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+    const src=audioCtx.createMediaStreamSource(stream),an=audioCtx.createAnalyser();an.fftSize=512;src.connect(an);
+    const buf=new Uint8Array(an.fftSize);let peak=0;
+    const loop=()=>{an.getByteTimeDomainData(buf);let m=0;for(const v of buf)m=Math.max(m,Math.abs(v-128));
+      const p=Math.min(100,m/64*100);$("lvl").style.width=p+"%";peak=Math.max(peak,p);
+      if(peak>35){st.textContent="✓ Микрофон слышит";st.className="status ok"}
+      raf=requestAnimationFrame(loop)};
+    loop();st.textContent="Говорите…";st.className="status";
+  }catch(e){st.textContent="Нет доступа к микрофону. Разрешите доступ в настройках браузера или нажмите «Не реагирует».";st.className="status bad"}
+}
+
+async function camTest(k,facing,title,text){
+  card(`<h1>${title}</h1><p>${text}</p><video id="vid" playsinline muted autoplay></video><div class="status" id="camSt"></div>${answer(k,"Изображение хорошее","Не работает или дефект")}`);
+  const st=$("camSt");
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){st.textContent="Браузер не даёт доступ к камере. Откройте страницу по адресу https.";st.className="status bad";return}
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facing}},audio:false});
+    const v=$("vid");if(v){v.srcObject=stream;await v.play().catch(()=>{})}
+  }catch(e){st.textContent="Камера не открылась. Разрешите доступ или отметьте «Не работает».";st.className="status bad"}
+}
+
+async function motionTest(){
+  const st=$("motSt");
+  try{
+    if(typeof DeviceMotionEvent!=="undefined"&&typeof DeviceMotionEvent.requestPermission==="function"){
+      const p=await DeviceMotionEvent.requestPermission();if(p!=="granted"){st.textContent="Доступ к датчикам не разрешён.";st.className="status bad";return}
+    }
+  }catch(e){}
+  if(typeof DeviceMotionEvent==="undefined"){st.textContent="Браузер не поддерживает датчики.";st.className="status bad";return}
+  st.textContent="Покрутите телефон…";st.className="status";
+  let last=null,moved=0;
+  const h=e=>{const a=e.accelerationIncludingGravity||e.acceleration;if(!a||a.x==null)return;
+    if(last){moved+=Math.abs(a.x-last.x)+Math.abs(a.y-last.y)+Math.abs(a.z-last.z)}last={x:a.x,y:a.y,z:a.z};
+    if(moved>25){window.removeEventListener("devicemotion",h);st.textContent="✓ Датчики работают";st.className="status ok";setTimeout(()=>mark("motion","ok"),700)}};
+  window.addEventListener("devicemotion",h);
+}
+
+// result code: 5 digits (failed bits ×256 + skipped bits) + 1 check digit; the calculator decodes it
+function makeCode(){
+  let bad=0,skip=0;TESTS.forEach((t,i)=>{if(res[t.k]==="bad")bad|=1<<i;if(res[t.k]==="skip")skip|=1<<i});
+  const n=String(bad*256+skip).padStart(5,"0");
+  const c=[...n].reduce((s,d,i)=>s+(+d)*(i+1),0)%10;
+  return n+c;
+}
+function finish(){
+  exitFs();const code=makeCode();
+  const bad=TESTS.filter(t=>res[t.k]==="bad").length;
+  const rows=TESTS.map(t=>{const v=res[t.k];return `<li><span>${t.t}</span><span class="${v==="ok"?"tagok":v==="bad"?"tagbad":"tagskip"}">${v==="ok"?"✓ норма":v==="bad"?"✗ дефект":"— пропущено"}</span></li>`}).join("");
+  card(`<h1>${bad?"Найдены дефекты: "+bad:"Дефектов не найдено"}</h1>
+    <p class="big">Код результата для калькулятора:</p>
+    <div class="code">${code.slice(0,3)} ${code.slice(3)}</div>
+    <ul class="list">${rows}</ul>
+    ${deviceInfo()}
+    <div class="btns"><button class="ghost" onclick="restart()">Пройти заново</button></div>`);
+}
+function deviceInfo(){
+  const s=`${screen.width}×${screen.height} (×${(devicePixelRatio||1).toFixed(1)})`;
+  let html=`<p class="info">Экран: ${s}</p><p class="info" id="batInfo"></p>`;
+  if(navigator.getBattery)navigator.getBattery().then(b=>{const el=$("batInfo");if(el)el.textContent=`Заряд сейчас: ${Math.round(b.level*100)}%${b.charging?" (заряжается)":""}`}).catch(()=>{});
+  return html;
+}
+function restart(){for(const k in res)delete res[k];step=-1;start()}
+function start(){
+  card(`<h1>Проверка телефона</h1>
+    <p>8 коротких шагов: экран, сенсор, динамик, микрофон, обе камеры, вибрация и датчики. Займёт 1–2 минуты.</p>
+    <p class="big">Перед началом: громкость на максимум, телефон без чехла.</p>
+    <p class="info">Браузер попросит доступ к камере и микрофону: нажмите «Разрешить». Ничего не записывается и никуда не отправляется.</p>
+    <div class="btns"><button onclick="next()">Начать проверку</button></div>`);
+}
+start();
+</script>
+</body>
+</html>
