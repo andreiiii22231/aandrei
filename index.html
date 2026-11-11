@@ -69,7 +69,9 @@ const TESTS=[
   {k:"rear",   t:"Основная камера"},
   {k:"front",  t:"Фронтальная камера"},
   {k:"vibro",  t:"Вибрация"},
-  {k:"motion", t:"Датчики движения"}
+  {k:"motion", t:"Датчики движения"},
+  {k:"net",    t:"Связь"},
+  {k:"charge", t:"Зарядка"}
 ];
 const res={}; // k -> "ok" | "bad" | "skip"
 let step=-1, stream=null, audioCtx=null, raf=0;
@@ -79,6 +81,7 @@ const scr=$("screen"), layer=$("layer");
 function stopMedia(){
   if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
   if(raf){cancelAnimationFrame(raf);raf=0}
+  if(battery){battery.onchargingchange=battery.onlevelchange=null}
 }
 function setProg(){
   const n=Math.max(0,Math.min(step,TESTS.length));
@@ -118,8 +121,47 @@ const RUN={
   },
   motion(){
     card(`<h1>Датчики движения</h1><p>Нажмите «Начать» и покрутите телефон в руке.</p><button onclick="motionTest()">Начать</button><div class="status" id="motSt"></div><div class="btns"><button class="bad" onclick="mark('motion','bad')">Не реагирует</button><button class="ghost" onclick="mark('motion','skip')">Пропустить</button></div>`);
+  },
+  net(){
+    card(`<h1>Связь</h1><p>1. Выключите Wi‑Fi, мобильный интернет оставьте включённым, и нажмите «Проверить интернет».</p><button onclick="netTest()">📶 Проверить интернет</button><div class="status" id="netSt"></div><p>2. Позвоните на любой номер, например в салон: вызов должен пойти, собеседника хорошо слышно. Сеть и SIM-карту браузер проверить не может, это делается звонком.</p>${answer("net","Интернет и звонки работают","Нет сети или не звонит")}`);
+  },
+  charge(){
+    if(!navigator.getBattery){
+      card(`<h1>Зарядка</h1><p>Подключите зарядное устройство. На экране должен появиться значок молнии, процент заряда должен начать расти. Пошевелите штекер: зарядка не должна пропадать.</p>${answer("charge","Заряжается","Не заряжается")}`);return;
+    }
+    card(`<h1>Зарядка</h1><p>Подключите зарядное устройство и подождите несколько секунд. Пошевелите штекер: зарядка не должна пропадать.</p><div class="status" id="chgSt">Проверяю…</div>${answer("charge","Заряжается","Не заряжается или пропадает")}`);
+    chargeTest();
   }
 };
+
+async function netTest(){
+  const st=$("netSt");st.textContent="Проверяю…";st.className="status";
+  const c=navigator.connection||navigator.mozConnection||navigator.webkitConnection;
+  if(!navigator.onLine){st.textContent="✗ Нет подключения к интернету.";st.className="status bad";return}
+  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),10000),t0=performance.now();
+  try{
+    await fetch(location.href.split("#")[0].split("?")[0]+"?ping="+Date.now(),{cache:"no-store",signal:ctl.signal});
+    clearTimeout(tm);
+    const ms=Math.round(performance.now()-t0);
+    let how="";
+    if(c&&c.type==="wifi"){st.textContent="Интернет есть, но через Wi‑Fi. Выключите Wi‑Fi и проверьте ещё раз.";st.className="status";return}
+    if(c&&c.type==="cellular")how=" через мобильную сеть";
+    if(c&&c.effectiveType)how+=` (${c.effectiveType.toUpperCase()})`;
+    st.textContent=`✓ Интернет работает${how}, ответ за ${ms} мс`;st.className="status ok";
+  }catch(e){clearTimeout(tm);st.textContent="✗ Интернет не отвечает. Проверьте, что мобильные данные включены.";st.className="status bad"}
+}
+
+let battery=null;
+async function chargeTest(){
+  const st=$("chgSt");
+  try{battery=battery||await navigator.getBattery()}catch(e){if(st)st.textContent="Не удалось узнать состояние батареи, проверьте по значку молнии.";return}
+  const b=battery;
+  const show=()=>{const el=$("chgSt");if(!el)return;
+    const lvl=Math.round(b.level*100);
+    if(b.charging){el.textContent=`✓ Идёт зарядка, заряд ${lvl}%`;el.className="status ok"}
+    else{el.textContent=`Не заряжается, заряд ${lvl}%. Подключите зарядку.`;el.className="status"}};
+  show();b.onchargingchange=show;b.onlevelchange=show;
+}
 
 function fs(el){try{(el.requestFullscreen||el.webkitRequestFullscreen||function(){}).call(el)}catch(e){}}
 function exitFs(){try{if(document.fullscreenElement)document.exitFullscreen()}catch(e){}}
@@ -211,11 +253,12 @@ async function motionTest(){
   window.addEventListener("devicemotion",h);
 }
 
-// result code: 5 digits (failed bits ×256 + skipped bits) + 1 check digit; the calculator decodes it
+// result code (7 digits): "1" (format version) + 5 digits holding each test's state in base 3
+// (0 ok, 1 defect, 2 skipped; test i is the 3^i place) + 1 check digit; the calculator decodes it
 function makeCode(){
-  let bad=0,skip=0;TESTS.forEach((t,i)=>{if(res[t.k]==="bad")bad|=1<<i;if(res[t.k]==="skip")skip|=1<<i});
-  const n=String(bad*256+skip).padStart(5,"0");
-  const c=[...n].reduce((s,d,i)=>s+(+d)*(i+1),0)%10;
+  let v=0;TESTS.forEach((t,i)=>{v+=(res[t.k]==="bad"?1:res[t.k]==="skip"?2:0)*3**i});
+  const n="1"+String(v).padStart(5,"0");
+  const c=[...n].reduce((s,d,i)=>s+(+d)*(i%2?3:1),0)%10;
   return n+c;
 }
 function finish(){
@@ -238,8 +281,8 @@ function deviceInfo(){
 function restart(){for(const k in res)delete res[k];step=-1;start()}
 function start(){
   card(`<h1>Проверка телефона</h1>
-    <p>8 коротких шагов: экран, сенсор, динамик, микрофон, обе камеры, вибрация и датчики. Займёт 1–2 минуты.</p>
-    <p class="big">Перед началом: громкость на максимум, телефон без чехла.</p>
+    <p>10 коротких шагов: экран, сенсор, динамик, микрофон, обе камеры, вибрация, датчики, связь и зарядка. Займёт 2–3 минуты.</p>
+    <p class="big">Перед началом: громкость на максимум, телефон без чехла, рядом зарядное устройство.</p>
     <p class="info">Браузер попросит доступ к камере и микрофону: нажмите «Разрешить». Ничего не записывается и никуда не отправляется.</p>
     <div class="btns"><button onclick="next()">Начать проверку</button></div>`);
 }
